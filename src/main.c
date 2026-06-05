@@ -30,13 +30,14 @@ static u32                gPrevAction   = 0;
 static ListenerID gSetActionListenerID;
 static ListenerID gExecuteActionListenerID;
 static ListenerID gFrameUpdateListenerID;
+static ListenerID gLongJumpListenerID;
+static ListenerID gBackflipListenerID;
 
+// Long jump and backflip are handled by dedicated events; only these remain.
 static int is_charged_jump(u32 action) {
     return action == ACT_JUMP
         || action == ACT_DOUBLE_JUMP
-        || action == ACT_LONG_JUMP
-        || action == ACT_SIDE_FLIP
-        || action == ACT_BACKFLIP;
+        || action == ACT_SIDE_FLIP;
 }
 
 static void on_player_set_action(IEvent* event) {
@@ -51,13 +52,33 @@ static void on_execute_action(IEvent* event) {
         gMario->particleFlags |= PARTICLE_SPARKLES;
 }
 
+static void on_long_jump(IEvent* event) {
+    if (!gCharged) return;
+    PlayerLongJump* e = (PlayerLongJump*)event;
+    e->m->vel[1]   *= BOOST_LJ_VERT;
+    *e->forwardVel *= BOOST_LJ_HORIZ;
+    gCharged      = 0;
+    gChargeHold   = 0;
+    gCrouchFrames = 0;
+}
+
+static void on_backflip(IEvent* event) {
+    if (!gCharged) return;
+    PlayerBackflip* e = (PlayerBackflip*)event;
+    e->m->vel[1] *= BOOST_FLIP_VERT;
+    gCharged      = 0;
+    gChargeHold   = 0;
+    gCrouchFrames = 0;
+}
+
 static void on_frame_update(IEvent* event) {
     (void)event;
     if (gMario == NULL) return;
 
     u32 action = gMario->action;
 
-    // Consume charge on any jump
+    // Consume charge on regular/double/side-flip jumps; long jump and backflip
+    // are handled by their dedicated event listeners above.
     if (gCharged && action != gPrevAction && is_charged_jump(action)) {
         gBoostPending = 1;
         gCharged      = 0;
@@ -68,11 +89,8 @@ static void on_frame_update(IEvent* event) {
     if (gBoostPending) {
         if (gMario->vel[1] > 0.0f) {
             u32 a = gMario->action;
-            if (a == ACT_LONG_JUMP) {
-                gMario->vel[1]     *= BOOST_LJ_VERT;
-                gMario->forwardVel *= BOOST_LJ_HORIZ;
-            } else if (a == ACT_BACKFLIP || a == ACT_SIDE_FLIP) {
-                gMario->vel[1]     *= BOOST_FLIP_VERT;
+            if (a == ACT_SIDE_FLIP) {
+                gMario->vel[1] *= BOOST_FLIP_VERT;
             } else {
                 gMario->vel[1]     *= BOOST_JUMP_VERT;
                 gMario->forwardVel *= BOOST_JUMP_HORIZ;
@@ -113,10 +131,14 @@ MOD_INIT() {
     gSetActionListenerID     = REGISTER_LISTENER(PlayerSetAction,     EVENT_PRIORITY_NORMAL, on_player_set_action);
     gExecuteActionListenerID = REGISTER_LISTENER(PlayerExecuteAction, EVENT_PRIORITY_NORMAL, on_execute_action);
     gFrameUpdateListenerID   = REGISTER_LISTENER(GameFrameUpdate,     EVENT_PRIORITY_NORMAL, on_frame_update);
+    gLongJumpListenerID      = REGISTER_LISTENER(PlayerLongJump,      EVENT_PRIORITY_NORMAL, on_long_jump);
+    gBackflipListenerID      = REGISTER_LISTENER(PlayerBackflip,      EVENT_PRIORITY_NORMAL, on_backflip);
 }
 
 MOD_EXIT() {
     UNREGISTER_LISTENER(PlayerSetAction,     gSetActionListenerID);
     UNREGISTER_LISTENER(PlayerExecuteAction, gExecuteActionListenerID);
     UNREGISTER_LISTENER(GameFrameUpdate,     gFrameUpdateListenerID);
+    UNREGISTER_LISTENER(PlayerLongJump,      gLongJumpListenerID);
+    UNREGISTER_LISTENER(PlayerBackflip,      gBackflipListenerID);
 }
